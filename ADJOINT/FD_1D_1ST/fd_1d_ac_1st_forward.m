@@ -26,19 +26,20 @@
 %                   DT                                          DZ
 
 %==========================================================================
-clear all; close all ;
+clear all; %close all ;
 
 % ***************************** input parameters **************************
-BUILD_MATRIX = 1 ;
+BUILD_MATRIX = 0 ;
 
 NZ_MED    = 31 ;
+global DZ ;
 DZ        = 10 ;
 NPML_ZBEG = 10 ;
 NPML_ZEND = 0 ;
 RCOEF     = 1.e-10 ;
 NT        = 401 ;
 DT        = 0.001 ;
-RHO       = 1.0 ;
+RHO       = 1000 ;
 VP        = 4000 ;
 FREQ      = 20 ;
 LSTENCIL  = 2 ;
@@ -83,10 +84,10 @@ if (BUILD_MATRIX)
     nvar = var_id - 1 ;
     fprintf("Total variables %d\n", nvar) ;
     
-    MAT_P     = zeros(nvar, nvar) ;
-    MAT_V     = zeros(nvar, nvar) ;
-    MAT_MEM_P = zeros(nvar, nvar) ;
-    MAT_MEM_V = zeros(nvar, nvar) ;
+    MAT_P     = eye(nvar) ;
+    MAT_V     = eye(nvar) ;
+    MAT_MEM_P = eye(nvar) ;
+    MAT_MEM_V = eye(nvar) ;
 end
 
 
@@ -153,33 +154,34 @@ for it=1:NT
 end
 
 % loop on time steps
-for it=2:NT
+for it=2:NT      
     
     % compute pressure
     for iz=izBeg1:izEnd1
         if (BUILD_MATRIX)
-            MAT_P = fill_mat(MAT_P, pr(it,iz), vz(it-1,:), iz, coef1(iz)) ;
+            MAT_P = add_der_op(MAT_P, pr(it,iz), vz(it-1,:), iz, coef1(iz)) ;               
         else
-            pr(it,iz) = pr(it-1,iz) + coef1(iz) * D_Z(vz(it-1,:), iz, DZ) ;
+            pr(it,iz) = pr(it-1,iz) + coef1(iz) * D_Z(vz(it-1,:), iz) ;
         end
     end
     
     % update cpml pressure (z-)
     for iz=izBeg1:izBeg2-1
         ipml = iz ;
-        if (BUILD_MATRIX)
-            MAT_P = fill_mat2(MAT_P, pr(it,iz), mem_vz_zBeg(ipml), coef1(iz)) ;
-            MAT_MEM_V = fill_mat2(MAT_MEM_V, mem_vz_zBeg(ipml), mem_vz_zBeg(ipml), bpml_zBeg(ipml)) ;
-            MAT_MEM_V = fill_mat(MAT_MEM_V, mem_vz_zBeg(ipml), vz(it-1,:), iz, apml_zBeg(ipml)) ;
+        if (BUILD_MATRIX)         
+            MAT_P = add_1term(MAT_P, pr(it,iz), mem_vz_zBeg(ipml), coef1(iz)) ;
+            MAT_MEM_V = replace_1term(MAT_MEM_V, mem_vz_zBeg(ipml), mem_vz_zBeg(ipml), bpml_zBeg(ipml)) ;
+            MAT_MEM_V = add_der_op(MAT_MEM_V, mem_vz_zBeg(ipml), vz(it-1,:), iz, apml_zBeg(ipml)) ;
         else
-            d_vz_z = D_Z(vz(it-1,:), iz, DZ) ;
+            d_vz_z = D_Z(vz(it-1,:), iz) ;
             mem_vz_zBeg(ipml) = bpml_zBeg(ipml) * mem_vz_zBeg(ipml) + apml_zBeg(ipml) * d_vz_z ;
             pr(it,iz) = pr(it,iz) + coef1(iz) * mem_vz_zBeg(ipml) ;
         end
     end
     
     % add source
-    if ~(BUILD_MATRIX)
+    if ~(BUILD_MATRIX)*1.15
+        
         for iz=1:NZ
             pr(it,iz) = pr(it,iz) + source(it-1,iz) ;
         end
@@ -188,9 +190,9 @@ for it=2:NT
     % compute velocity
     for iz=izBeg1:izEnd1-1
         if (BUILD_MATRIX)
-            MAT_V = fill_mat(MAT_V, vz(it,iz), pr(it,:), iz+1, coef2(iz)) ;
+            MAT_V = add_der_op(MAT_V, vz(it,iz), pr(it,:), iz+1, coef2(iz)) ;            
         else
-            vz(it,iz) = vz(it-1,iz) + coef2(iz) * D_Z(pr(it,:), iz+1, DZ) ;
+            vz(it,iz) = vz(it-1,iz) + coef2(iz) * D_Z(pr(it,:), iz+1) ;
         end
     end
     
@@ -198,11 +200,11 @@ for it=2:NT
     for iz=izBeg1:izBeg2-1
         ipml = iz ;
         if (BUILD_MATRIX)
-            MAT_V = fill_mat2(MAT_V, vz(it,iz), mem_pr_zBeg(ipml), coef2(iz)) ;
-            MAT_MEM_P = fill_mat2(MAT_MEM_P, mem_pr_zBeg(ipml), mem_pr_zBeg(ipml), bpml_half_zBeg(ipml)) ;
-            MAT_MEM_P = fill_mat(MAT_MEM_P, mem_pr_zBeg(ipml), pr(it,:), iz+1, apml_half_zBeg(ipml)) ;
+            MAT_V = add_1term(MAT_V, vz(it,iz), mem_pr_zBeg(ipml), coef2(iz)) ;
+            MAT_MEM_P = replace_1term(MAT_MEM_P, mem_pr_zBeg(ipml), mem_pr_zBeg(ipml), bpml_half_zBeg(ipml)) ;
+            MAT_MEM_P = add_der_op(MAT_MEM_P, mem_pr_zBeg(ipml), pr(it,:), iz+1, apml_half_zBeg(ipml)) ;
         else
-            d_pr_z = D_Z(pr(it,:), iz+1, DZ) ;
+            d_pr_z = D_Z(pr(it,:), iz+1) ;
             mem_pr_zBeg(ipml) = bpml_half_zBeg(ipml) * mem_pr_zBeg(ipml) + apml_half_zBeg(ipml) * d_pr_z ;
             vz(it,iz) = vz(it,iz) + coef2(iz) * mem_pr_zBeg(ipml) ;
         end
@@ -214,8 +216,8 @@ for it=2:NT
 end
 
 if (BUILD_MATRIX)
-    
-    % plot matrices
+          
+    % plot matrices    
     
     %plot_matrix(MAT_P, "Forward operator P")
     MAT_P_BIN=binary_matrix(MAT_P) ;
@@ -250,18 +252,18 @@ if (BUILD_MATRIX)
     for it=2:NT
         
         % update cpml pressure (z-)
-        %u_next = MAT_MEM_V * u_prev ;
-        %u_prev = u_next ;
-        
-        % compute pressure
-        u_prev(xsrc) = 1.0 ;
-        u_next = MAT_P * u_prev ;                
+        u_next = MAT_MEM_V * u_prev ;
         u_prev = u_next ;
+        
+        % compute pressure          
+        u_next = MAT_P * u_prev ;                
+        u_prev = u_next ;             
         
         % add source
         for iz=1:NZ
-            %u_prev(pr(it,iz)) = u_prev(pr(it,iz)) + source(it-1,iz) ;
-        end          
+            u_next(pr(it,iz)) = u_next(pr(it,iz)) + source(it-1,iz) ;
+        end     
+        u_prev = u_next ;  
         
         % store wavefield
         for iz=1:NZ
@@ -269,12 +271,12 @@ if (BUILD_MATRIX)
         end
         
         % update cpml velocity (z+)
-        %u_next = MAT_MEM_P * u_prev ;
-        %u_prev = u_next ;
-        
-        % compute velocity
-        u_next = MAT_V * u_prev ;
+        u_next = MAT_MEM_P * u_prev ;
         u_prev = u_next ;
+        
+        % compute velocity        
+        u_next = MAT_V * u_prev ;
+        u_prev = u_next ;      
         
         % store wavefield
         for iz=1:NZ
@@ -285,16 +287,21 @@ if (BUILD_MATRIX)
 end
 
 % display components
-plot_matrix(pr, "pr id", 1)
-plot_matrix(pr2, "pr computed with matrices", 0.1)
-plot_matrix(vz2, "vz computed with matrices", 0.1)
+if (BUILD_MATRIX)
+    plot_matrix(pr2, "pr computed with matrices", 0.5)
+    plot_matrix(vz2, "vz computed with matrices", 0.5)
+else
+    plot_matrix(pr, "pr computed with FD scheme", 0.5)
+    plot_matrix(vz, "pr computed with FD scheme", 0.5)
+end
 
 %==========================================================================
 %                        FUNCTIONS DEFINITIONS
 %==========================================================================
 
 % compute (spatial) FD derivative
-function [der] = D_Z(U, iz, DZ)
+function [der] = D_Z(U, iz)
+global DZ ;
 % FD O2
 %der = (u(iz) - u(iz-1)) / DZ ;
 % FD O4
@@ -302,28 +309,34 @@ der = (1.125 * (U(iz) - U(iz-1)) -1/24 * (U(iz+1) - U(iz-2))) / DZ ;
 end
 
 % add entries in matrix related to partial derivaties
-function M = fill_mat(M, destid, source, iz, coef)
+function M = add_der_op(M, destid, source, iz, coef)
+global DZ ;
 
 % FD point #1
 sourceid = source(iz - 2) ;
-M(destid, sourceid) = M(destid, sourceid) + 1/24 * coef ;
+M(destid, sourceid) = M(destid, sourceid) + 1/24 / DZ * coef ;
 
 % FD point #2
 sourceid = source(iz - 1) ;
-M(destid, sourceid) = M(destid, sourceid) - 1.125 * coef ;
+M(destid, sourceid) = M(destid, sourceid) - 1.125/ DZ * coef ;
 
 % FD point #3
 sourceid = source(iz) ;
-M(destid, sourceid) = M(destid, sourceid) + 1.125 * coef ;
+M(destid, sourceid) = M(destid, sourceid) + 1.125 / DZ * coef ;
 
 % FD point #4
 sourceid = source(iz + 1) ;
-M(destid, sourceid) = M(destid, sourceid) - 1/24 * coef ;
+M(destid, sourceid) = M(destid, sourceid) - 1/24 / DZ * coef ;
 end
 
 % add single entry in matrix
-function M = fill_mat2(M, destid, sourceid, coef)
+function M = add_1term(M, destid, sourceid, coef)
 M(destid, sourceid) = M(destid, sourceid) + coef ;
+end
+
+% replace single entry in matrix
+function M = replace_1term(M, destid, sourceid, coef)
+M(destid, sourceid) = coef ;
 end
 
 % plot the values within a matrix

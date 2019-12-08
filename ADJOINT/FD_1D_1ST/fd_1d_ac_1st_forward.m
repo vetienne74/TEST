@@ -1,51 +1,63 @@
 
 %==========================================================================
 % 1d fd acoustic modeling
-
+% V. Etienne - Dec 2019
+%
+% This code compute forward and adjoint modelling for the
 % 1st order wave equation, pressure-veloicty
-
+%
+% There are 4 distinct computations:
+% #1 forward modelling with standard explicit FD scheme
+% #2 forward modelling with matrix-vector products
+% #3 adjoint modelling with standard explicit FD scheme
+% #4 adjoint modelling with matrix-vector products
+%
+% the forward euqation:
 % dP /dt = coef1 dvz/dz + S
 % dvz/dt = coef2 dP/dz
-
+%
 % with
-
+%
 % coef1 = kappa = (rho * vp * vp) at pr location
 % coef2 = 1/rho
 % where rho is CONSTANT
-
+%
 % reference grid is P (z=0, t=0)
-
+%
 % discrete scheme
-
+%
 %  P^(n+1)_i - P^n_i           V^(n+0.5)_(i+0.5) - V^(n+0.5)_(i-0.5)
 %  ----------------- = coef1_i ------------------------------------- + S^(n+0.5)_i
 %         DT                                    DZ
-
+%
 %  V^(n+0.5)_(i+0.5) - V^(n-0.5)_(i+0.5)                 P^n_(i+1) - P^n_i
 %  ------------------------------------- = coef2_(i+0.5) ------------------
 %                   DT                                          DZ
-
+%
 %==========================================================================
-clear all; %close all ;
+clear all;
+close all ;
 
 % ***************************** input parameters **************************
-BUILD_MATRIX = 0 ;
-
-NZ_MED    = 31 ;
+NZ_MED    = 31 ;      % number of grid points in medium
 global DZ ;
-DZ        = 10 ;
-NPML_ZBEG = 10 ;
-NPML_ZEND = 0 ;
-RCOEF     = 1.e-10 ;
-NT        = 401 ;
-DT        = 0.001 ;
-RHO       = 1000 ;
-VP        = 4000 ;
-FREQ      = 20 ;
-LSTENCIL  = 2 ;
-PERC      = 0.2 ;
+DZ        = 10 ;      % spatial smapling (m)
+NPML_ZBEG = 10 ;      % number of grid point cpml z-
+
+RCOEF     = 1.e-10 ;  % cpml reflection coefficient
+NT        = 401 ;     % number of time steps
+DT        = 0.001 ;   % time step (s)
+RHO       = 1000 ;    % rho is constant
+VP        = 4000 ;    % vp is constant
+FREQ      = 20 ;      % frequency of source Ricker function
+PERC      = 0.2 ;     % saturation coef. for figures
+
+% please do not change the following parameters
+NPML_ZEND = 0 ;       % number of grid point cpml z+ (NOT YET SUPPORTED)
+LSTENCIL  = 2 ;       % half FD stencil length (ONLY FD O4 SUPPORTED)
 % ***************************** end parameters *****************************
 
+% compute usefull indexes
 nz = NZ_MED + NPML_ZBEG + NPML_ZEND + 2*LSTENCIL ;
 izBeg  = 1 ;
 izBeg1 = izBeg  + LSTENCIL ;
@@ -61,35 +73,6 @@ vz          = zeros(NT,NZ) ;
 npml_zBeg   = NPML_ZBEG + 2*LSTENCIL ;
 mem_pr_zBeg = zeros(npml_zBeg,1) ;
 mem_vz_zBeg = zeros(npml_zBeg,1) ;
-
-if (BUILD_MATRIX)
-    var_id = 1 ;
-    for iz=1:NZ
-        pr(:,iz) = var_id ;
-        var_id = var_id + 1 ;
-    end
-    for iz=1:NZ
-        vz(:,iz) = var_id ;
-        var_id = var_id + 1 ;
-    end
-    for iz=1:npml_zBeg
-        mem_pr_zBeg(iz) = var_id ;
-        var_id = var_id + 1 ;
-    end
-    for iz=1:npml_zBeg
-        mem_vz_zBeg(iz) = var_id ;
-        var_id = var_id + 1 ;
-    end
-    global nvar
-    nvar = var_id - 1 ;
-    fprintf("Total variables %d\n", nvar) ;
-    
-    MAT_P     = eye(nvar) ;
-    MAT_V     = eye(nvar) ;
-    MAT_MEM_P = eye(nvar) ;
-    MAT_MEM_V = eye(nvar) ;
-end
-
 
 % allocate static variables
 coef1 = zeros(NZ,1) ;
@@ -153,151 +136,227 @@ for it=1:NT
     source (it,xsrc) = (1. - 2. * a2) * exp(-a2) ;
 end
 
+%==================================================================================
+%
+%            Phase  1: forward modelling with standard FD scheme
+%
+%==================================================================================
+
 % loop on time steps
-for it=2:NT      
+for it=2:NT
     
     % compute pressure
     for iz=izBeg1:izEnd1
-        if (BUILD_MATRIX)
-            MAT_P = add_der_op(MAT_P, pr(it,iz), vz(it-1,:), iz, coef1(iz)) ;               
-        else
-            pr(it,iz) = pr(it-1,iz) + coef1(iz) * D_Z(vz(it-1,:), iz) ;
-        end
+        pr(it,iz) = pr(it-1,iz) + coef1(iz) * D_Z(vz(it-1,:), iz) ;
     end
     
     % update cpml pressure (z-)
     for iz=izBeg1:izBeg2-1
         ipml = iz ;
-        if (BUILD_MATRIX)         
-            MAT_P = add_1term(MAT_P, pr(it,iz), mem_vz_zBeg(ipml), coef1(iz)) ;
-            MAT_MEM_V = replace_1term(MAT_MEM_V, mem_vz_zBeg(ipml), mem_vz_zBeg(ipml), bpml_zBeg(ipml)) ;
-            MAT_MEM_V = add_der_op(MAT_MEM_V, mem_vz_zBeg(ipml), vz(it-1,:), iz, apml_zBeg(ipml)) ;
-        else
-            d_vz_z = D_Z(vz(it-1,:), iz) ;
-            mem_vz_zBeg(ipml) = bpml_zBeg(ipml) * mem_vz_zBeg(ipml) + apml_zBeg(ipml) * d_vz_z ;
-            pr(it,iz) = pr(it,iz) + coef1(iz) * mem_vz_zBeg(ipml) ;
-        end
+        d_vz_z = D_Z(vz(it-1,:), iz) ;
+        mem_vz_zBeg(ipml) = bpml_zBeg(ipml) * mem_vz_zBeg(ipml) + apml_zBeg(ipml) * d_vz_z ;
+        pr(it,iz) = pr(it,iz) + coef1(iz) * mem_vz_zBeg(ipml) ;
     end
     
     % add source
-    if ~(BUILD_MATRIX)*1.15
-        
-        for iz=1:NZ
-            pr(it,iz) = pr(it,iz) + source(it-1,iz) ;
-        end
+    for iz=1:NZ
+        pr(it,iz) = pr(it,iz) + source(it-1,iz) ;
     end
     
     % compute velocity
     for iz=izBeg1:izEnd1-1
-        if (BUILD_MATRIX)
-            MAT_V = add_der_op(MAT_V, vz(it,iz), pr(it,:), iz+1, coef2(iz)) ;            
-        else
-            vz(it,iz) = vz(it-1,iz) + coef2(iz) * D_Z(pr(it,:), iz+1) ;
-        end
+        vz(it,iz) = vz(it-1,iz) + coef2(iz) * D_Z(pr(it,:), iz+1) ;
     end
     
     % update cpml velocity (z+)
     for iz=izBeg1:izBeg2-1
         ipml = iz ;
-        if (BUILD_MATRIX)
-            MAT_V = add_1term(MAT_V, vz(it,iz), mem_pr_zBeg(ipml), coef2(iz)) ;
-            MAT_MEM_P = replace_1term(MAT_MEM_P, mem_pr_zBeg(ipml), mem_pr_zBeg(ipml), bpml_half_zBeg(ipml)) ;
-            MAT_MEM_P = add_der_op(MAT_MEM_P, mem_pr_zBeg(ipml), pr(it,:), iz+1, apml_half_zBeg(ipml)) ;
-        else
-            d_pr_z = D_Z(pr(it,:), iz+1) ;
-            mem_pr_zBeg(ipml) = bpml_half_zBeg(ipml) * mem_pr_zBeg(ipml) + apml_half_zBeg(ipml) * d_pr_z ;
-            vz(it,iz) = vz(it,iz) + coef2(iz) * mem_pr_zBeg(ipml) ;
-        end
-    end
-    
-    if (BUILD_MATRIX)
-        break
+        d_pr_z = D_Z(pr(it,:), iz+1) ;
+        mem_pr_zBeg(ipml) = bpml_half_zBeg(ipml) * mem_pr_zBeg(ipml) + apml_half_zBeg(ipml) * d_pr_z ;
+        vz(it,iz) = vz(it,iz) + coef2(iz) * mem_pr_zBeg(ipml) ;
     end
 end
 
-if (BUILD_MATRIX)
-          
-    % plot matrices    
+pr_forward_standard = pr ;
+vz_forward_standard = vz ;
+plot_matrix(pr_forward_standard, "pr computed with standard FD scheme", 0.5)
+plot_matrix(vz_forward_standard, "vz computed with standard FD scheme", 0.5)
+
+%==================================================================================
+%
+%            Phase  2: forward modelling with matrix vector products
+%
+%==================================================================================
+
+% first build matrices
+%++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+% associate each unknown with an unique id
+var_id = 1 ;
+for iz=1:NZ
+    pr(:,iz) = var_id ;
+    var_id = var_id + 1 ;
+end
+for iz=1:NZ
+    vz(:,iz) = var_id ;
+    var_id = var_id + 1 ;
+end
+for iz=1:npml_zBeg
+    mem_pr_zBeg(iz) = var_id ;
+    var_id = var_id + 1 ;
+end
+for iz=1:npml_zBeg
+    mem_vz_zBeg(iz) = var_id ;
+    var_id = var_id + 1 ;
+end
+global nvar
+nvar = var_id - 1 ;
+fprintf("Total variables %d\n", nvar) ;
+
+MAT_P     = eye(nvar) ;
+MAT_V     = eye(nvar) ;
+MAT_MEM_P = eye(nvar) ;
+MAT_MEM_V = eye(nvar) ;
+
+% add entries in matrices following computations done standard FD scheme
+for it=2:NT
     
-    %plot_matrix(MAT_P, "Forward operator P")
-    MAT_P_BIN=binary_matrix(MAT_P) ;
-    plot_matrix(MAT_P_BIN, "Forward operator P (binary)", 1)
-    %plot_matrix(MAT_V, "Forward operator V")
-    MAT_V_BIN=binary_matrix(MAT_V) ;
-    plot_matrix(MAT_V_BIN, "Forward operator V (binary)", 1)
-    
-    %plot_matrix(MAT_MEM_P, "Forward operator MEM P")
-    MAT_MEM_P_BIN=binary_matrix(MAT_MEM_P) ;
-    plot_matrix(MAT_MEM_P_BIN, "Forward operator MEM P (binary)", 1)
-    %plot_matrix(MAT_MEM_V, "Forward operator MEM V")
-    MAT_MEM_V_BIN=binary_matrix(MAT_MEM_V) ;
-    plot_matrix(MAT_MEM_V_BIN, "Forward operator MEM V (binary)", 1)
-    
-    plot_matrix(MAT_P_BIN+MAT_V_BIN+MAT_MEM_P_BIN+MAT_MEM_V_BIN, ...
-        "Forward operator Sum (binary)", 1)
-    
-    % perform modeling with the matrices
-    %************************************
-    
-    % allocate new variables
-    pr2          = zeros(NT,NZ) ;
-    vz2          = zeros(NT,NZ) ;
-    mem_pr_zBeg2 = zeros(npml_zBeg,1) ;
-    mem_vz_zBeg2 = zeros(npml_zBeg,1) ;
-    
-    u_next = zeros(nvar,1) ;
-    u_prev = zeros(nvar,1) ;
-    
-    % loop on time steps
-    for it=2:NT
-        
-        % update cpml pressure (z-)
-        u_next = MAT_MEM_V * u_prev ;
-        u_prev = u_next ;
-        
-        % compute pressure          
-        u_next = MAT_P * u_prev ;                
-        u_prev = u_next ;             
-        
-        % add source
-        for iz=1:NZ
-            u_next(pr(it,iz)) = u_next(pr(it,iz)) + source(it-1,iz) ;
-        end     
-        u_prev = u_next ;  
-        
-        % store wavefield
-        for iz=1:NZ
-            pr2(it,iz) = u_next(pr(it,iz)) ;
-        end
-        
-        % update cpml velocity (z+)
-        u_next = MAT_MEM_P * u_prev ;
-        u_prev = u_next ;
-        
-        % compute velocity        
-        u_next = MAT_V * u_prev ;
-        u_prev = u_next ;      
-        
-        % store wavefield
-        for iz=1:NZ
-            vz2(it,iz) = u_next(vz(it,iz)) ;
-        end
-        
+    % compute pressure
+    for iz=izBeg1:izEnd1
+        MAT_P = add_der_op(MAT_P, pr(it,iz), vz(it-1,:), iz, coef1(iz)) ;
+        %pr(it,iz) = pr(it-1,iz) + coef1(iz) * D_Z(vz(it-1,:), iz) ;
     end
+    
+    % update cpml pressure (z-)
+    for iz=izBeg1:izBeg2-1
+        ipml = iz ;
+        MAT_P = add_1term(MAT_P, pr(it,iz), mem_vz_zBeg(ipml), coef1(iz)) ;
+        MAT_MEM_V = replace_1term(MAT_MEM_V, mem_vz_zBeg(ipml), mem_vz_zBeg(ipml), bpml_zBeg(ipml)) ;
+        MAT_MEM_V = add_der_op(MAT_MEM_V, mem_vz_zBeg(ipml), vz(it-1,:), iz, apml_zBeg(ipml)) ;
+        %d_vz_z = D_Z(vz(it-1,:), iz) ;
+        %mem_vz_zBeg(ipml) = bpml_zBeg(ipml) * mem_vz_zBeg(ipml) + apml_zBeg(ipml) * d_vz_z ;
+        %pr(it,iz) = pr(it,iz) + coef1(iz) * mem_vz_zBeg(ipml) ;
+    end
+    
+    % add source
+    % nothing to do
+    
+    % compute velocity
+    for iz=izBeg1:izEnd1-1
+        MAT_V = add_der_op(MAT_V, vz(it,iz), pr(it,:), iz+1, coef2(iz)) ;
+        %vz(it,iz) = vz(it-1,iz) + coef2(iz) * D_Z(pr(it,:), iz+1) ;
+    end
+    
+    % update cpml velocity (z+)
+    for iz=izBeg1:izBeg2-1
+        ipml = iz ;
+        MAT_V = add_1term(MAT_V, vz(it,iz), mem_pr_zBeg(ipml), coef2(iz)) ;
+        MAT_MEM_P = replace_1term(MAT_MEM_P, mem_pr_zBeg(ipml), mem_pr_zBeg(ipml), bpml_half_zBeg(ipml)) ;
+        MAT_MEM_P = add_der_op(MAT_MEM_P, mem_pr_zBeg(ipml), pr(it,:), iz+1, apml_half_zBeg(ipml)) ;
+        %d_pr_z = D_Z(pr(it,:), iz+1) ;
+        %mem_pr_zBeg(ipml) = bpml_half_zBeg(ipml) * mem_pr_zBeg(ipml) + apml_half_zBeg(ipml) * d_pr_z ;
+        %vz(it,iz) = vz(it,iz) + coef2(iz) * mem_pr_zBeg(ipml) ;
+    end
+    
+    % one time step is enough
+    break
+end
+
+% plot matrices
+
+%plot_matrix(MAT_P, "Forward operator P")
+MAT_P_BIN=binary_matrix(MAT_P) ;
+plot_matrix(MAT_P_BIN, "Forward operator P (binary)", 1)
+%plot_matrix(MAT_V, "Forward operator V")
+MAT_V_BIN=binary_matrix(MAT_V) ;
+plot_matrix(MAT_V_BIN, "Forward operator V (binary)", 1)
+
+%plot_matrix(MAT_MEM_P, "Forward operator MEM P")
+MAT_MEM_P_BIN=binary_matrix(MAT_MEM_P) ;
+plot_matrix(MAT_MEM_P_BIN, "Forward operator MEM P (binary)", 1)
+%plot_matrix(MAT_MEM_V, "Forward operator MEM V")
+MAT_MEM_V_BIN=binary_matrix(MAT_MEM_V) ;
+plot_matrix(MAT_MEM_V_BIN, "Forward operator MEM V (binary)", 1)
+
+plot_matrix(MAT_P_BIN+MAT_V_BIN+MAT_MEM_P_BIN+MAT_MEM_V_BIN, ...
+    "Forward operator Sum (binary)", 1)
+
+% second, perform modeling with the matrices
+%++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+% allocate new variables
+pr2          = zeros(NT,NZ) ;
+vz2          = zeros(NT,NZ) ;
+mem_pr_zBeg2 = zeros(npml_zBeg,1) ;
+mem_vz_zBeg2 = zeros(npml_zBeg,1) ;
+
+u_next = zeros(nvar,1) ;
+u_prev = zeros(nvar,1) ;
+
+% loop on time steps
+for it=2:NT
+    
+    % update cpml pressure (z-)
+    u_next = MAT_MEM_V * u_prev ;
+    u_prev = u_next ;
+    
+    % compute pressure
+    u_next = MAT_P * u_prev ;
+    u_prev = u_next ;
+    
+    % add source
+    for iz=1:NZ
+        u_next(pr(it,iz)) = u_next(pr(it,iz)) + source(it-1,iz) ;
+    end
+    u_prev = u_next ;
+    
+    % store wavefield
+    for iz=1:NZ
+        pr2(it,iz) = u_next(pr(it,iz)) ;
+    end
+    
+    % update cpml velocity (z+)
+    u_next = MAT_MEM_P * u_prev ;
+    u_prev = u_next ;
+    
+    % compute velocity
+    u_next = MAT_V * u_prev ;
+    u_prev = u_next ;
+    
+    % store wavefield
+    for iz=1:NZ
+        vz2(it,iz) = u_next(vz(it,iz)) ;
+    end    
 end
 
 % display components
-if (BUILD_MATRIX)
-    plot_matrix(pr2, "pr computed with matrices", 0.5)
-    plot_matrix(vz2, "vz computed with matrices", 0.5)
-else
-    plot_matrix(pr, "pr computed with FD scheme", 0.5)
-    plot_matrix(vz, "pr computed with FD scheme", 0.5)
-end
+pr_forward_matrix = pr2;
+vz_forward_matrix = vz2;
+plot_matrix(pr_forward_matrix, "pr with matrix-vector products", 0.5)
+plot_matrix(vz_forward_matrix, "vz with matrix-vector products", 0.5)
 
-%==========================================================================
+% compute NRMS between phase 1 and phase 2
+pr_nrms = compute_nrms(pr_forward_standard, pr_forward_matrix) 
+vz_nrms = compute_nrms(vz_forward_standard, vz_forward_matrix) 
+
+%==================================================================================
+%
+%            Phase  3: ADJOINT modelling with standard FD scheme
+%
+%==================================================================================
+
+%==================================================================================
+%
+%            Phase  4: ADJOINT modelling with matrix vector products
+%
+%==================================================================================
+
+
+%**********************************************************************************
+%
 %                        FUNCTIONS DEFINITIONS
-%==========================================================================
+%
+%**********************************************************************************
 
 % compute (spatial) FD derivative
 function [der] = D_Z(U, iz)
@@ -355,11 +414,25 @@ end
 % convert a matrix M to sign(M)
 % usefull to visualize the non-zero terms of a matrix
 function M2 = binary_matrix(M)
-global nvar
+size_mat=size(M) ;
 M2=M;
-for ix=1:nvar
-    for iy=1:nvar
+for ix=1:size_mat(1)
+    for iy=1:size_mat(2)
         M2(ix,iy) = sign(M(ix,iy)) ;
     end
 end
+end
+
+% compute NRMS between 2 wavefield
+function nrms = compute_nrms(u, v)
+size_mat=size(u) ;
+diff = 0 ;
+ref  = 0 ;
+for ix=1:size_mat(1)
+    for iy=1:size_mat(2)
+        diff = diff + (u(ix, iy) - v(ix, iy)) * (u(ix, iy) - v(ix, iy)) ;
+        ref  = ref  + u(ix, iy) * u(ix, iy) ;
+    end
+end
+nrms = sqrt(diff) / sqrt(ref) ;
 end

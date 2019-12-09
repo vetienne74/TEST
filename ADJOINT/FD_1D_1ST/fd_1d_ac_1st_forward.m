@@ -179,8 +179,6 @@ end
 
 pr_forward_standard = pr ;
 vz_forward_standard = vz ;
-plot_matrix(pr_forward_standard, "pr computed with standard FD scheme", 0.5)
-plot_matrix(vz_forward_standard, "vz computed with standard FD scheme", 0.5)
 
 %==================================================================================
 %
@@ -264,22 +262,26 @@ end
 
 % plot matrices
 
+figure('Position',[100 100 900 700])
+subplot(2,2,1)
 %plot_matrix(MAT_P, "Forward operator P")
 MAT_P_BIN=binary_matrix(MAT_P) ;
 plot_matrix(MAT_P_BIN, "Forward operator P (binary)", 1)
+subplot(2,2,2)
 %plot_matrix(MAT_V, "Forward operator V")
 MAT_V_BIN=binary_matrix(MAT_V) ;
 plot_matrix(MAT_V_BIN, "Forward operator V (binary)", 1)
-
+subplot(2,2,3)
 %plot_matrix(MAT_MEM_P, "Forward operator MEM P")
 MAT_MEM_P_BIN=binary_matrix(MAT_MEM_P) ;
 plot_matrix(MAT_MEM_P_BIN, "Forward operator MEM P (binary)", 1)
+subplot(2,2,4)
 %plot_matrix(MAT_MEM_V, "Forward operator MEM V")
 MAT_MEM_V_BIN=binary_matrix(MAT_MEM_V) ;
 plot_matrix(MAT_MEM_V_BIN, "Forward operator MEM V (binary)", 1)
 
-plot_matrix(MAT_P_BIN+MAT_V_BIN+MAT_MEM_P_BIN+MAT_MEM_V_BIN, ...
-    "Forward operator Sum (binary)", 1)
+%plot_matrix(MAT_P_BIN+MAT_V_BIN+MAT_MEM_P_BIN+MAT_MEM_V_BIN, ...
+%    "Forward operator Sum (binary)", 1)
 
 % second, perform modeling with the matrices
 %++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -306,7 +308,7 @@ for it=2:NT
     
     % add source
     for iz=1:NZ
-        u_next(pr(it,iz)) = u_next(pr(it,iz)) + source(it-1,iz) ;
+        u_next(pr(it,iz)) = u_prev(pr(it,iz)) + source(it-1,iz) ;
     end
     u_prev = u_next ;
     
@@ -332,12 +334,37 @@ end
 % display components
 pr_forward_matrix = pr2;
 vz_forward_matrix = vz2;
-plot_matrix(pr_forward_matrix, "pr with matrix-vector products", 0.5)
-plot_matrix(vz_forward_matrix, "vz with matrix-vector products", 0.5)
 
 % compute NRMS between phase 1 and phase 2
 pr_nrms = compute_nrms(pr_forward_standard, pr_forward_matrix) 
 vz_nrms = compute_nrms(vz_forward_standard, vz_forward_matrix) 
+
+figure('Position',[100 100 900 700])
+subplot(2,2,1)
+plot_matrix(pr_forward_standard, "pr computed with standard FD scheme", 0.5)
+subplot(2,2,2)
+plot_matrix(vz_forward_standard, "vz computed with standard FD scheme", 0.5)
+subplot(2,2,3)
+plot_matrix(pr_forward_matrix, "pr with matrix-vector products", 0.5)
+subplot(2,2,4)
+plot_matrix(vz_forward_matrix, "vz with matrix-vector products", 0.5)
+
+% test matrix combinations
+A = MAT_P * MAT_MEM_V ;
+B = MAT_V * MAT_MEM_P ;
+
+figure('Position',[100 100 1500 500])
+subplot(1,2,1)
+plot_matrix_lines(binary_matrix(A), "A (binary)", 1, pr, vz, mem_pr_zBeg, mem_vz_zBeg)
+subplot(1,2,2)
+plot_matrix_lines(binary_matrix(A'), "A' (binary)", 1, pr, vz, mem_pr_zBeg, mem_vz_zBeg)
+
+figure('Position',[100 100 1500 500])
+subplot(1,2,1)
+plot_matrix_lines(binary_matrix(B), "B (binary)", 1, pr, vz, mem_pr_zBeg, mem_vz_zBeg)
+subplot(1,2,2)
+plot_matrix_lines(binary_matrix(B'), "B' (binary)", 1, pr, vz, mem_pr_zBeg, mem_vz_zBeg)
+
 
 %==================================================================================
 %
@@ -401,7 +428,7 @@ end
 % plot the values within a matrix
 % beware that small values night not be visible
 function [] = plot_matrix(M, name, perc)
-figure
+%figure
 hold on
 title(name)
 imagesc(M)
@@ -409,6 +436,33 @@ max_val=max(max(abs(M))) ;
 caxis([-perc*max_val perc*max_val])
 colorbar; colormap(gray) ;
 axis tight ; axis ij ;
+end
+
+% plot the values within a matrix
+% beware that small values night not be visible
+function [] = plot_matrix_lines(M, name, perc, pr, vz, mem_pr_zBeg, mem_vz_zBeg)
+global nvar 
+hold on
+title(name)
+imagesc(M)
+max_val=max(max(abs(M))) ;
+caxis([-perc*max_val perc*max_val])
+colorbar; colormap(gray) ;
+axis tight ; axis ij ;
+
+xline=[1 nvar] ;
+zline=[max(max(pr)) max(max(pr))] ;
+plot(xline, zline, '--y')
+plot(zline, xline, '--y')
+zline=[max(max(vz)) max(max(vz))] ;
+plot(xline, zline, '--r')
+plot(zline, xline, '--r')
+zline=[max(max(mem_pr_zBeg)) max(max(mem_pr_zBeg))] ;
+plot(xline, zline, '--b')
+plot(zline, xline, '--b')
+%zline=[max(max(mem_vz_zBeg)) max(max(mem_vz_zBeg))] ;
+%plot(xline, zline, '--g')
+%plot(zline, xline, '--g')
 end
 
 % convert a matrix M to sign(M)

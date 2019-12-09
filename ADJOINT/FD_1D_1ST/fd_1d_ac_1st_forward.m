@@ -145,36 +145,37 @@ end
 % loop on time steps
 for it=2:NT
     
-    % compute pressure
-    for iz=izBeg1:izEnd1
-        pr(it,iz) = pr(it-1,iz) + coef1(iz) * D_Z(vz(it-1,:), iz) ;
+    % compute velocity at time = (it-1)*dt -1/2dt
+    for iz=izBeg1:izEnd1-1
+        vz(it,iz) = vz(it-1,iz) + coef2(iz) * D_Z(pr(it-1,:), iz+1) ;
     end
     
-    % update cpml pressure (z-)
+    % update cpml velocity (z-) at time = (it-1)*dt -1/2dt
     for iz=izBeg1:izBeg2-1
         ipml = iz ;
-        d_vz_z = D_Z(vz(it-1,:), iz) ;
+        d_pr_z = D_Z(pr(it-1,:), iz+1) ;
+        mem_pr_zBeg(ipml) = bpml_half_zBeg(ipml) * mem_pr_zBeg(ipml) + apml_half_zBeg(ipml) * d_pr_z ;
+        vz(it,iz) = vz(it,iz) + coef2(iz) * mem_pr_zBeg(ipml) ;
+    end
+    
+    % compute pressure at time = (it-1)*dt
+    for iz=izBeg1:izEnd1
+        pr(it,iz) = pr(it-1,iz) + coef1(iz) * D_Z(vz(it,:), iz) ;
+    end
+    
+    % update cpml pressure (z-) at time = (it-1)*dt
+    for iz=izBeg1:izBeg2-1
+        ipml = iz ;
+        d_vz_z = D_Z(vz(it,:), iz) ;
         mem_vz_zBeg(ipml) = bpml_zBeg(ipml) * mem_vz_zBeg(ipml) + apml_zBeg(ipml) * d_vz_z ;
         pr(it,iz) = pr(it,iz) + coef1(iz) * mem_vz_zBeg(ipml) ;
     end
     
     % add source
     for iz=1:NZ
-        pr(it,iz) = pr(it,iz) + source(it-1,iz) ;
+        pr(it,iz) = pr(it,iz) + source(it,iz) ;
     end
-    
-    % compute velocity
-    for iz=izBeg1:izEnd1-1
-        vz(it,iz) = vz(it-1,iz) + coef2(iz) * D_Z(pr(it,:), iz+1) ;
-    end
-    
-    % update cpml velocity (z+)
-    for iz=izBeg1:izBeg2-1
-        ipml = iz ;
-        d_pr_z = D_Z(pr(it,:), iz+1) ;
-        mem_pr_zBeg(ipml) = bpml_half_zBeg(ipml) * mem_pr_zBeg(ipml) + apml_half_zBeg(ipml) * d_pr_z ;
-        vz(it,iz) = vz(it,iz) + coef2(iz) * mem_pr_zBeg(ipml) ;
-    end
+        
 end
 
 pr_forward_standard = pr ;
@@ -219,43 +220,43 @@ MAT_MEM_V = eye(nvar) ;
 % add entries in matrices following computations done standard FD scheme
 for it=2:NT
     
-    % compute pressure
-    for iz=izBeg1:izEnd1
-        MAT_P = add_der_op(MAT_P, pr(it,iz), vz(it-1,:), iz, coef1(iz)) ;
-        %pr(it,iz) = pr(it-1,iz) + coef1(iz) * D_Z(vz(it-1,:), iz) ;
+    % compute velocity at time = (it-1)*dt -1/2dt
+    for iz=izBeg1:izEnd1-1
+        MAT_V = add_der_op(MAT_V, vz(it,iz), pr(it,:), iz+1, coef2(iz)) ;
+        %vz(it,iz) = vz(it,iz) + coef2(iz) * D_Z(pr(it-1,:), iz+1) ;
     end
     
-    % update cpml pressure (z-)
+    % update cpml velocity (z-) at time = (it-1)*dt -1/2dt
+    for iz=izBeg1:izBeg2-1
+        ipml = iz ;
+        MAT_V = add_1term(MAT_V, vz(it,iz), mem_pr_zBeg(ipml), coef2(iz)) ;
+        MAT_MEM_P = replace_1term(MAT_MEM_P, mem_pr_zBeg(ipml), mem_pr_zBeg(ipml), bpml_half_zBeg(ipml)) ;
+        MAT_MEM_P = add_der_op(MAT_MEM_P, mem_pr_zBeg(ipml), pr(it,:), iz+1, apml_half_zBeg(ipml)) ;
+        %d_pr_z = D_Z(pr(it-1,:), iz+1) ;
+        %mem_pr_zBeg(ipml) = bpml_half_zBeg(ipml) * mem_pr_zBeg(ipml) + apml_half_zBeg(ipml) * d_pr_z ;
+        %vz(it,iz) = vz(it,iz) + coef2(iz) * mem_pr_zBeg(ipml) ;
+    end
+
+    % compute pressure at time = (it-1)*dt
+    for iz=izBeg1:izEnd1
+        MAT_P = add_der_op(MAT_P, pr(it,iz), vz(it-1,:), iz, coef1(iz)) ;
+        %pr(it,iz) = pr(it-1,iz) + coef1(iz) * D_Z(vz(it,:), iz) ;
+    end
+    
+    % update cpml pressure (z-) at time = (it-1)*dt
     for iz=izBeg1:izBeg2-1
         ipml = iz ;
         MAT_P = add_1term(MAT_P, pr(it,iz), mem_vz_zBeg(ipml), coef1(iz)) ;
         MAT_MEM_V = replace_1term(MAT_MEM_V, mem_vz_zBeg(ipml), mem_vz_zBeg(ipml), bpml_zBeg(ipml)) ;
         MAT_MEM_V = add_der_op(MAT_MEM_V, mem_vz_zBeg(ipml), vz(it-1,:), iz, apml_zBeg(ipml)) ;
-        %d_vz_z = D_Z(vz(it-1,:), iz) ;
+        %d_vz_z = D_Z(vz(it,:), iz) ;
         %mem_vz_zBeg(ipml) = bpml_zBeg(ipml) * mem_vz_zBeg(ipml) + apml_zBeg(ipml) * d_vz_z ;
         %pr(it,iz) = pr(it,iz) + coef1(iz) * mem_vz_zBeg(ipml) ;
     end
     
     % add source
     % nothing to do
-    
-    % compute velocity
-    for iz=izBeg1:izEnd1-1
-        MAT_V = add_der_op(MAT_V, vz(it,iz), pr(it,:), iz+1, coef2(iz)) ;
-        %vz(it,iz) = vz(it-1,iz) + coef2(iz) * D_Z(pr(it,:), iz+1) ;
-    end
-    
-    % update cpml velocity (z+)
-    for iz=izBeg1:izBeg2-1
-        ipml = iz ;
-        MAT_V = add_1term(MAT_V, vz(it,iz), mem_pr_zBeg(ipml), coef2(iz)) ;
-        MAT_MEM_P = replace_1term(MAT_MEM_P, mem_pr_zBeg(ipml), mem_pr_zBeg(ipml), bpml_half_zBeg(ipml)) ;
-        MAT_MEM_P = add_der_op(MAT_MEM_P, mem_pr_zBeg(ipml), pr(it,:), iz+1, apml_half_zBeg(ipml)) ;
-        %d_pr_z = D_Z(pr(it,:), iz+1) ;
-        %mem_pr_zBeg(ipml) = bpml_half_zBeg(ipml) * mem_pr_zBeg(ipml) + apml_half_zBeg(ipml) * d_pr_z ;
-        %vz(it,iz) = vz(it,iz) + coef2(iz) * mem_pr_zBeg(ipml) ;
-    end
-    
+        
     % one time step is enough
     break
 end
@@ -298,17 +299,30 @@ u_prev = zeros(nvar,1) ;
 % loop on time steps
 for it=2:NT
     
-    % update cpml pressure (z-)
+    % update cpml velocity (z+) at time = (it-1)*dt -1/2dt
+    u_next = MAT_MEM_P * u_prev ;
+    u_prev = u_next ;
+    
+    % compute velocity at time = (it-1)*dt -1/2dt
+    u_next = MAT_V * u_prev ;
+    u_prev = u_next ;
+    
+    % store wavefield
+    for iz=1:NZ
+        vz2(it,iz) = u_next(vz(it,iz)) ;
+    end 
+    
+    % update cpml pressure (z-) at time = (it-1)*dt
     u_next = MAT_MEM_V * u_prev ;
     u_prev = u_next ;
     
-    % compute pressure
+    % compute pressure at time = (it-1)*dt
     u_next = MAT_P * u_prev ;
     u_prev = u_next ;
     
     % add source
     for iz=1:NZ
-        u_next(pr(it,iz)) = u_prev(pr(it,iz)) + source(it-1,iz) ;
+        u_next(pr(it,iz)) = u_prev(pr(it,iz)) + source(it,iz) ;
     end
     u_prev = u_next ;
     
@@ -316,19 +330,7 @@ for it=2:NT
     for iz=1:NZ
         pr2(it,iz) = u_next(pr(it,iz)) ;
     end
-    
-    % update cpml velocity (z+)
-    u_next = MAT_MEM_P * u_prev ;
-    u_prev = u_next ;
-    
-    % compute velocity
-    u_next = MAT_V * u_prev ;
-    u_prev = u_next ;
-    
-    % store wavefield
-    for iz=1:NZ
-        vz2(it,iz) = u_next(vz(it,iz)) ;
-    end    
+           
 end
 
 % display components
@@ -350,8 +352,8 @@ subplot(2,2,4)
 plot_matrix(vz_forward_matrix, "vz with matrix-vector products", 0.5)
 
 % test matrix combinations
-A = MAT_P * MAT_MEM_V ;
-B = MAT_V * MAT_MEM_P ;
+A = MAT_V * MAT_MEM_P ;
+B = MAT_P * MAT_MEM_V ;
 
 figure('Position',[100 100 1500 500])
 subplot(1,2,1)
@@ -365,6 +367,12 @@ plot_matrix_lines(binary_matrix(B), "B (binary)", 1, pr, vz, mem_pr_zBeg, mem_vz
 subplot(1,2,2)
 plot_matrix_lines(binary_matrix(B'), "B' (binary)", 1, pr, vz, mem_pr_zBeg, mem_vz_zBeg)
 
+BA = B*A;
+figure('Position',[100 100 1500 500])
+subplot(1,2,1)
+plot_matrix_lines(binary_matrix(BA), "BA (binary)", 1, pr, vz, mem_pr_zBeg, mem_vz_zBeg)
+subplot(1,2,2)
+plot_matrix_lines(binary_matrix((BA)'), "(BA)' (binary)", 1, pr, vz, mem_pr_zBeg, mem_vz_zBeg)
 
 %==================================================================================
 %

@@ -348,8 +348,17 @@ subplot(2,2,2)
 plot_matrix(vz_forward_standard, "vz computed with standard FD scheme", 0.5)
 subplot(2,2,3)
 plot_matrix(pr_forward_matrix, "pr with matrix-vector products", 0.5)
+plot_matrix(pr_forward_matrix, "pr with matrix-vector2 products", 0.5)
+text_str = sprintf('NRMS=%d', pr_nrms) ;
+text(10, 350, text_str) ;
 subplot(2,2,4)
 plot_matrix(vz_forward_matrix, "vz with matrix-vector products", 0.5)
+plot_matrix(pr_forward_matrix, "pr with matrix-vector2 products", 0.5)
+text_str = sprintf('NRMS=%d', vz_nrms) ;
+text(10, 350, text_str) ;
+
+% try with 2nd order wve eq.
+%$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
 
 % test matrix combinations
 A = MAT_V * MAT_MEM_P ;
@@ -373,6 +382,58 @@ subplot(1,2,1)
 plot_matrix_lines(binary_matrix(BA), "BA (binary)", 1, pr, vz, mem_pr_zBeg, mem_vz_zBeg)
 subplot(1,2,2)
 plot_matrix_lines(binary_matrix((BA)'), "(BA)' (binary)", 1, pr, vz, mem_pr_zBeg, mem_vz_zBeg)
+
+% allocate new variables
+pr2          = zeros(NT,NZ) ;
+vz2          = zeros(NT,NZ) ;
+mem_pr_zBeg2 = zeros(npml_zBeg,1) ;
+mem_vz_zBeg2 = zeros(npml_zBeg,1) ;
+
+u_next = zeros(nvar,1) ;
+u_prev = zeros(nvar,1) ;
+
+% loop on time steps
+for it=2:NT
+    
+    % update all components at once
+    u_next = BA * u_prev ;
+    u_prev = u_next ;        
+    
+    % add source
+    for iz=1:NZ
+        u_next(pr(it,iz)) = u_prev(pr(it,iz)) + source(it,iz) ;
+    end
+    u_prev = u_next ;
+    
+    % store wavefield
+    for iz=1:NZ
+        pr2(it,iz) = u_next(pr(it,iz)) ;
+    end
+           
+end
+
+% display components
+pr_forward_matrix2 = pr2;
+vz_forward_matrix2 = vz2;
+
+% compute NRMS between phase 1 and phase 2
+pr_nrms = compute_nrms(pr_forward_standard, pr_forward_matrix2) 
+vz_nrms = compute_nrms(vz_forward_standard, vz_forward_matrix2) 
+
+figure('Position',[100 100 900 700])
+subplot(2,2,1)
+plot_matrix(pr_forward_standard, "pr computed with standard FD scheme", 0.5)
+subplot(2,2,2)
+plot_matrix(vz_forward_standard, "vz computed with standard FD scheme", 0.5)
+subplot(2,2,3)
+plot_matrix(pr_forward_matrix2, "pr with matrix-vector2 products", 0.5)
+text_str = sprintf('NRMS=%d', pr_nrms) ;
+text(10, 350, text_str) ;
+subplot(2,2,4)
+plot_matrix(vz_forward_matrix2, "vz with matrix-vector2 products", 0.5)
+text_str = sprintf('NRMS=%d', vz_nrms) ;
+text(10, 350, text_str) ;
+
 
 %==================================================================================
 %
